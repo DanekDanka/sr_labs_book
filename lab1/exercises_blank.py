@@ -18,12 +18,17 @@ def split_meta_line(line, delimiter=' '):
 
     ###########################################################
     # Here is your code
+    splited_line = line.split(delimiter)
+    speaker_id = splited_line[0]
+    gender =  splited_line[1]
+    file_path = splited_line[2]
+    file_path = file_path[:len(file_path)-1]  # delete end_line symbol
 
     ###########################################################
 
     return speaker_id, gender, file_path
 
-def preemphasis(signal, pre_emphasis=0.97):
+def preemphasis(signal, pre_emphasis=-0.97):
     #Here you need to preemphasis input signal with pre_emphasis coeffitient
 
     """
@@ -34,6 +39,7 @@ def preemphasis(signal, pre_emphasis=0.97):
 
     ###########################################################
     # Here is your code
+    emphasized_signal = [signal[i] + pre_emphasis * signal[i-1] for i in range(1,len(signal))]
 
     ###########################################################
 
@@ -55,8 +61,7 @@ def framing(emphasized_signal, sample_rate=16000, frame_size=0.025, frame_stride
     signal_length = len(emphasized_signal)
     frame_length = int(round(frame_length))
     frame_step = int(round(frame_step))
-    num_frames = int(
-        np.ceil(float(np.abs(signal_length - frame_length)) / frame_step)) # make sure that we have at least 1 frame
+    num_frames = int(np.ceil(float(np.abs(signal_length - frame_length)) / frame_step)) # make sure that we have at least 1 frame
 
     pad_signal_length = num_frames * frame_step + frame_length
     z = np.zeros((pad_signal_length - signal_length))
@@ -65,6 +70,14 @@ def framing(emphasized_signal, sample_rate=16000, frame_size=0.025, frame_stride
 
     ###########################################################
     # Here is your code to compute frames
+    hamming_window = np.hamming(frame_length)
+    frames = np.zeros((num_frames, frame_length))
+    
+    for i in range(num_frames):
+        start = i * frame_step
+        end = start + frame_length
+        frame = pad_signal[start:end]
+        frames[i] = frame * hamming_window
 
     ###########################################################
 
@@ -83,6 +96,7 @@ def power_spectrum(frames, NFFT=512):
 
     ###########################################################
     # Here is your code to compute pow_frames
+    pow_frames = 1.0 / NFFT * mag_frames ** 2
 
     ###########################################################
 
@@ -104,6 +118,7 @@ def compute_fbank_filters(nfilt=40, sample_rate=16000, NFFT=512):
     ###########################################################
     # Here is your code to convert Convert Hz to Mel: 
     # high_freq -> high_freq_mel
+    high_freq_mel = 2595 * np.log10(1 + high_freq / 700)
     
     ###########################################################
 
@@ -112,6 +127,7 @@ def compute_fbank_filters(nfilt=40, sample_rate=16000, NFFT=512):
     ###########################################################
     # Here is your code to convert Convert Mel to Hz: 
     # mel_points -> hz_points
+    hz_points = 700 * (10**(mel_points / 2595) - 1)
     
     ###########################################################
 
@@ -141,6 +157,7 @@ def compute_fbanks_features(pow_frames, fbank):
     
     ###########################################################
     # Here is your code to compute filter_banks_features
+    filter_banks_features = np.dot(pow_frames, fbank.T)
     
     ###########################################################
 
@@ -161,6 +178,7 @@ def compute_mfcc(filter_banks_features, num_ceps=20):
     
     ###########################################################
     # Here is your code to compute mfcc features
+    mfcc = dct(filter_banks_features)[:, :num_ceps]
     
     ###########################################################
 
@@ -190,6 +208,7 @@ def mvn_floating(features, LC, RC, unbiased=False):
     
     ###########################################################
     # Here is your code to compute normalised features
+    normalised_features = (features - f) / np.sqrt(s)
     
     ###########################################################
 
