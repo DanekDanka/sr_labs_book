@@ -178,7 +178,7 @@ def compute_mfcc(filter_banks_features, num_ceps=20):
     
     ###########################################################
     # Here is your code to compute mfcc features
-    mfcc = dct(filter_banks_features)[:, :num_ceps]
+    mfcc = dct(filter_banks_features)[:, 1:num_ceps]
     
     ###########################################################
 
