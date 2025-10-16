@@ -15,6 +15,34 @@ def load_vad_markup(path_to_rttm, signal, fs):
         
     ###########################################################
     # Here is your code
+    with open(path_to_rttm, 'r') as file:
+        lines = file.readlines()
+        
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        fields = line.split()
+        if len(fields) < 5:
+            continue
+            
+        object_type = fields[0]
+        if object_type != 'SPEAKER':
+            continue
+                
+        start_time = float(fields[3])
+        duration = float(fields[4])
+        end_time = start_time + duration
+        
+        start_sample = int(start_time * fs)
+        end_sample = int(end_time * fs)
+        
+        start_sample = max(0, min(start_sample, len(signal)))
+        end_sample = max(0, min(end_sample, len(signal)))
+        
+        if start_sample < end_sample:
+            vad_markup[start_sample:end_sample] = 1.0
     
     ###########################################################
     
@@ -24,10 +52,16 @@ def framing(signal, window=320, shift=160):
     # Function to create frames from signal
     
     shape   = (int((signal.shape[0] - window)/shift + 1), window)
-    frames  = np.zeros().astype('float32')
+    frames  = np.zeros(shape).astype('float32')
 
     ###########################################################
     # Here is your code
+    
+    num_frames = int((len(signal) - window) / shift + 1)
+    for i in range(num_frames):
+        start_idx = i * shift
+        end_idx = start_idx + window
+        frames[i] = signal[start_idx:end_idx]
     
     ###########################################################
     
@@ -40,7 +74,8 @@ def frame_energy(frames):
 
     ###########################################################
     # Here is your code
-    
+    for i in range(frames.shape[0]):
+        E[i] = np.sum(frames[i])
     ###########################################################
     
     return E
@@ -52,7 +87,9 @@ def norm_energy(E):
 
     ###########################################################
     # Here is your code
-    
+    E_mean = np.mean(E)
+    E_std = np.std(E)
+    E_norm = (E - E_mean) / E_std
     ###########################################################
     
     return E_norm
@@ -67,16 +104,30 @@ def gmm_train(E, gauss_pdf, n_realignment):
 
     g = np.zeros([len(E), len(w)])
     for n in range(n_realignment):
+        
 
         # E-step
         ###########################################################
         # Here is your code
+        for j in range(len(w)):
+            g[:, j] = w[j] * gauss_pdf(E, m[j], sigma[j])
+        
+        g_sum = np.sum(g, axis=1, keepdims=True)
+        g = g / (g_sum + 1e-10)
 
         ###########################################################
 
         # M-step
         ###########################################################
         # Here is your code
+        N_k = np.sum(g, axis=0)
+        w = N_k / len(E)
+        
+        for j in range(len(w)):
+            m[j] = np.sum(g[:, j] * E) / (N_k[j] + 1e-10)
+        
+        for j in range(len(w)):
+            sigma[j] = np.sqrt(np.sum(g[:, j] * (E - m[j])**2) / (N_k[j] + 1e-10))
 
         ###########################################################
         
@@ -89,6 +140,12 @@ def eval_frame_post_prob(E, gauss_pdf, w, m, sigma):
 
     ###########################################################
     # Here is your code
+    denominator = np.zeros(len(E))
+    for j in range(len(w)):
+        denominator += w[j] * gauss_pdf(E, m[j], sigma[j])
+    
+    numerator = w[0] * gauss_pdf(E, m[0], sigma[0])
+    g0 = numerator / (denominator + 1e-10)
 
     ###########################################################
             
@@ -137,6 +194,8 @@ def reverb(signal, impulse_response):
     
     ###########################################################
     # Here is your code
+    signal_reverb = np.convolve(signal, impulse_response, mode='same')
+    signal_reverb = signal_reverb / np.max(np.abs(signal_reverb)) if np.max(np.abs(signal_reverb)) > 0 else signal_reverb
     
     ###########################################################
     
@@ -149,6 +208,9 @@ def awgn(signal, sigma_noise):
     
     ###########################################################
     # Here is your code
+    noise = np.random.normal(0, sigma_noise, len(signal))
+    signal_noise = signal + noise
+    signal_noise = signal_noise / np.max(np.abs(signal_noise)) if np.max(np.abs(signal_noise)) > 0 else signal_noise
     
     ###########################################################
     
