@@ -251,7 +251,7 @@ class MainModel(nn.Module):
 
     def forward(self, data, label=None):
 
-        data = data.reshape(-1, data.size()[-1]) 
+        data = data.reshape(-1, data.size()[-1]).cuda()  
         outp = self.__S__.forward(data)
 
         if label == None:
