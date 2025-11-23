@@ -14,7 +14,11 @@ def tar_imp_hists(all_scores, all_labels):
 
     ###########################################################
     # Here is your code
-    
+    for score, label in zip(all_scores, all_labels):
+        if label == 1:
+            tar_scores.append(score)
+        else:
+            imp_scores.append(score)
     ###########################################################
     
     tar_scores = np.array(tar_scores)
@@ -35,7 +39,9 @@ def llr(all_scores, all_labels, tar_scores, imp_scores, gauss_pdf):
     
     ###########################################################
     # Here is your code
-    
+    sorted_indices = np.argsort(all_scores)
+    all_scores_sort = all_scores[sorted_indices]
+    ground_truth_sort = all_labels[sorted_indices].astype(bool)
     ###########################################################
     
     tar_gauss_pdf = np.zeros(len(all_scores))
@@ -44,7 +50,10 @@ def llr(all_scores, all_labels, tar_scores, imp_scores, gauss_pdf):
     
     ###########################################################
     # Here is your code
-    
+    for i, score in enumerate(all_scores_sort):
+        tar_gauss_pdf[i] = gauss_pdf(score, tar_scores_mean, tar_scores_std)
+        imp_gauss_pdf[i] = gauss_pdf(score, imp_scores_mean, imp_scores_std)
+        LLR[i] = np.log(tar_gauss_pdf[i] / (imp_gauss_pdf[i] + 1e-10))
     ###########################################################
     
     return ground_truth_sort, all_scores_sort, tar_gauss_pdf, imp_gauss_pdf, LLR
@@ -84,7 +93,19 @@ def neyman_pearson_test(ground_truth_sort, LLR, tar_scores, imp_scores, fnr):
     
     ###########################################################
     # Here is your code
+    len_thr = len(LLR)
+    fnr_thr = np.zeros(len_thr)
+    fpr_thr = np.zeros(len_thr)
     
+    for idx in range(len_thr):
+        solution = LLR > LLR[idx]
+        err = (solution != ground_truth_sort)
+        fnr_thr[idx] = np.sum(err[ground_truth_sort]) / len(tar_scores)
+        fpr_thr[idx] = np.sum(err[~ground_truth_sort]) / len(imp_scores)
+    
+    fnr_idx = np.argmin(np.abs(fnr_thr - fnr))
+    thr = LLR[fnr_idx]
+    fpr = fpr_thr[fnr_idx]
     ###########################################################
     
     return thr, fpr
@@ -99,7 +120,18 @@ def bayes_test(ground_truth_sort, LLR, tar_scores, imp_scores, P_Htar, C00, C10,
     
     ###########################################################
     # Here is your code
+    thr = np.log(((C01 - C11) * (1 - P_Htar)) / ((C10 - C00) * P_Htar + 1e-10))
     
+    solution = LLR > thr
+    err = (solution != ground_truth_sort)
+    fnr = np.sum(err[ground_truth_sort]) / len(tar_scores)
+    fpr = np.sum(err[~ground_truth_sort]) / len(imp_scores)
+    
+    P_Himp = 1 - P_Htar
+    AC = (C00 * (1 - fnr) * P_Htar + 
+          C10 * fnr * P_Htar + 
+          C01 * fpr * P_Himp + 
+          C11 * (1 - fpr) * P_Himp)
     ###########################################################
     
     return thr, fnr, fpr, AC
@@ -115,7 +147,30 @@ def minmax_test(ground_truth_sort, LLR, tar_scores, imp_scores, P_Htar_thr, C00,
     
     ###########################################################
     # Here is your code
+    AC_values = np.zeros(len(P_Htar_thr))
     
+    for i, P_Htar_val in enumerate(P_Htar_thr):
+        thr_temp = np.log(((C01 - C11) * (1 - P_Htar_val)) / ((C10 - C00) * P_Htar_val + 1e-10))
+        
+        solution = LLR > thr_temp
+        err = (solution != ground_truth_sort)
+        fnr_temp = np.sum(err[ground_truth_sort]) / len(tar_scores)
+        fpr_temp = np.sum(err[~ground_truth_sort]) / len(imp_scores)
+        
+        AC_values[i] = (C00 * (1 - fnr_temp) * P_Htar_val + 
+                       C10 * fnr_temp * P_Htar_val + 
+                       C01 * fpr_temp * (1 - P_Htar_val) + 
+                       C11 * (1 - fpr_temp) * (1 - P_Htar_val))
+    
+    max_idx = np.argmax(AC_values)
+    P_Htar = P_Htar_thr[max_idx]
+    AC = AC_values[max_idx]
+    
+    thr = np.log(((C01 - C11) * (1 - P_Htar)) / ((C10 - C00) * P_Htar + 1e-10))
+    solution = LLR > thr
+    err = (solution != ground_truth_sort)
+    fnr = np.sum(err[ground_truth_sort]) / len(tar_scores)
+    fpr = np.sum(err[~ground_truth_sort]) / len(imp_scores)
     ###########################################################
     
     return thr, fnr, fpr, AC, P_Htar
