@@ -55,9 +55,17 @@ class train_dataset_loader(Dataset):
         if self.augment:
             ###########################################################
             # Here is your code
-            augtype = random.randint(0, 4)  # 0: no augmentation, 1-4: different augmentation types
-            if augtype > 0:
-                audio = self.augment_wav(audio, augtype)
+
+            augtype = random.randint(0, 3)
+
+            if augtype == 0:
+                audio = self.augment_wav.reverberate(audio)
+            elif augtype == 1:
+                audio = self.augment_wav.additive_noise('music', audio)
+            elif augtype == 2:
+                audio = self.augment_wav.additive_noise('speech', audio)
+            else:
+                audio = self.augment_wav.additive_noise('noise', audio)
             
             ###########################################################
             
@@ -103,6 +111,8 @@ class test_dataset_loader(Dataset):
         return len(self.data_list)
 
 class MaxoutLinear(nn.Module):
+    # Maxout linear layer
+    
     def __init__(self, *args, **kwargs):
         
         super(MaxoutLinear, self).__init__()
@@ -210,31 +220,30 @@ class ResNet(nn.Module):
 
         ###########################################################
         # Here is your code
+
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
-        
+
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
-        
-        # Statistical pooling
-        x = x.reshape(x.size()[0], -1, x.size()[-1])
-        
-        if self.encoder_type == "SP":
-            # Standard statistical pooling
-            mean = torch.mean(x, dim=2)
-            std = torch.std(x, dim=2)
-            x = torch.cat((mean, std), dim=1)
-            
-        elif self.encoder_type == "ASP":
-            # Attentive statistical pooling
+
+        x = x.reshape(x.size(0), -1, x.size(-1))
+
+        if self.encoder_type == "ASP":
             w = self.attention(x)
             mu = torch.sum(x * w, dim=2)
-            sg = torch.sqrt((torch.sum((x**2) * w, dim=2) - mu**2).clamp(min=1e-5))
+            sg = torch.sqrt((torch.sum((x ** 2) * w, dim=2) - mu ** 2).clamp(min=1e-5))
             x = torch.cat((mu, sg), dim=1)
-        
+        elif self.encoder_type == "SP":
+            mu = torch.mean(x, dim=2)
+            sg = torch.sqrt((torch.mean(x ** 2, dim=2) - mu ** 2).clamp(min=1e-5))
+            x = torch.cat((mu, sg), dim=1)
+        else:
+            raise ValueError('Undefined encoder')
+
         x = self.fc(x)
 
         ###########################################################
@@ -242,6 +251,7 @@ class ResNet(nn.Module):
         return x
 
 class MainModel(nn.Module):
+    # Full computational graph including the neural network model and the cost function
 
     def __init__(self, model, trainfunc, **kwargs):
         super(MainModel, self).__init__();
@@ -251,7 +261,7 @@ class MainModel(nn.Module):
 
     def forward(self, data, label=None):
 
-        data = data.reshape(-1, data.size()[-1]).cuda()  
+        data = data.reshape(-1, data.size()[-1]).cuda() 
         outp = self.__S__.forward(data)
 
         if label == None:
@@ -266,9 +276,12 @@ class MainModel(nn.Module):
             return nloss, prec1
         
 def train_network(train_loader, main_model, optimizer, scheduler, num_epoch, verbose=False):
+    # Function to train model
+
     assert scheduler[1] in ['epoch', 'iteration']
     
     main_model.train()
+    device = next(main_model.parameters()).device
     
     stepsize = train_loader.batch_size
 
@@ -283,41 +296,34 @@ def train_network(train_loader, main_model, optimizer, scheduler, num_epoch, ver
         
         ###########################################################
         # Here is your code
-        data = data
-        data_label = data_label
-        
-        # Zero gradients
         optimizer.zero_grad()
-        
-        # Forward pass
-        nloss, prec1 = main_model(data, data_label)
-        
-        # Backward pass
+
+        label = torch.LongTensor(data_label).to(device)
+        nloss, prec1 = main_model(data, label)
+
         nloss.backward()
-        
-        # Update parameters
         optimizer.step()
-        
-        # Accumulate statistics - исправляем получение значений
-        loss += nloss.detach().item()
-        top1 += prec1.detach().item()
+
+        loss += nloss.detach().cpu().item()
+        top1 += prec1.detach().cpu().item()
         counter += 1
+        
         ###########################################################
         
         if verbose:
-            print("Epoch {:1.0f}, Batch {:1.0f}, LR {:f} Loss {:f}, Accuracy {:2.3f}%".format(
-                num_epoch, counter, optimizer.param_groups[0]['lr'], loss/counter, top1/counter))
+            print("Epoch {:1.0f}, Batch {:1.0f}, LR {:f} Loss {:f}, Accuracy {:2.3f}%".format(num_epoch, counter, optimizer.param_groups[0]['lr'], loss/counter, top1/counter))
 
-        if scheduler[1] == 'iteration': 
-            scheduler[0].step()
+        if scheduler[1] == 'iteration': scheduler[0].step()
 
-    if scheduler[1] == 'epoch': 
-        scheduler[0].step()
+    if scheduler[1] == 'epoch': scheduler[0].step()
 
     return (loss/counter, top1/counter)
 
 def test_network(test_loader, main_model):
+    # Function to test model
+    
     main_model.eval()
+    device = next(main_model.parameters()).device
 
     loss    = 0
     top1    = 0
@@ -329,15 +335,14 @@ def test_network(test_loader, main_model):
         
         ###########################################################
         # Here is your code
-        data = data
-        data_label = data_label
-        
         with torch.no_grad():
-            nloss, prec1 = main_model(data, data_label)
-        
-        loss += nloss.detach().item()
-        top1 += prec1.detach().item()
+            label = torch.LongTensor(data_label).to(device)
+            nloss, prec1 = main_model(data, label)
+
+        loss += nloss.detach().cpu().item()
+        top1 += prec1.detach().cpu().item()
         counter += 1
+        
         ###########################################################
 
     return (loss/counter, top1/counter)
