@@ -55,17 +55,32 @@ class train_dataset_loader(Dataset):
         if self.augment:
             ###########################################################
             # Here is your code
-
-            augtype = random.randint(0, 3)
-
-            if augtype == 0:
-                audio = self.augment_wav.reverberate(audio)
-            elif augtype == 1:
-                audio = self.augment_wav.additive_noise('music', audio)
-            elif augtype == 2:
-                audio = self.augment_wav.additive_noise('speech', audio)
-            else:
-                audio = self.augment_wav.additive_noise('noise', audio)
+            # audio shape is (1, max_audio) from loadWAV
+            # Randomly decide whether to apply augmentation (50% chance)
+            if random.random() < 0.5:
+                # Randomly select one of four augmentation types
+                augtype = random.randint(0, 3)
+                
+                if augtype == 0:
+                    # Reverberation - expects (1, max_audio) shape, returns (1, max_audio)
+                    audio = self.augment_wav.reverberate(audio)
+                elif augtype == 1:
+                    # Additive noise: music - pass 1D array, returns (1, max_audio)
+                    audio = self.augment_wav.additive_noise('music', audio[0])
+                elif augtype == 2:
+                    # Additive noise: speech - pass 1D array, returns (1, max_audio)
+                    audio = self.augment_wav.additive_noise('speech', audio[0])
+                else:
+                    # Additive noise: noise - pass 1D array, returns (1, max_audio)
+                    audio = self.augment_wav.additive_noise('noise', audio[0])
+                
+                # Ensure correct shape (1, max_audio) for return
+                # additive_noise returns (1, max_audio), reverberate returns (1, max_audio)
+                if audio.ndim == 1:
+                    audio = audio.reshape(1, -1)
+                elif audio.ndim == 2 and audio.shape[0] > 1:
+                    audio = audio[0:1]
+            # If random.random() >= 0.5, keep original audio without augmentation
             
             ###########################################################
             
