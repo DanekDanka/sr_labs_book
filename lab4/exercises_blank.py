@@ -4,6 +4,7 @@
 # Import of modules
 import numpy as np
 from matplotlib.pyplot import hist, plot, show, grid, title, xlabel, ylabel, legend, axis, imshow
+import matplotlib.pyplot as plt
 
 
 def tar_imp_hists(all_scores, all_labels):
@@ -40,9 +41,13 @@ def llr(all_scores, all_labels, tar_scores, imp_scores, gauss_pdf):
     
     ###########################################################
     # Here is your code
+    # Convert to numpy arrays to ensure proper indexing
+    all_scores = np.array(all_scores)
+    all_labels = np.array(all_labels)
+    
     sort_idx = np.argsort(all_scores)
     all_scores_sort = all_scores[sort_idx]
-    ground_truth_sort = np.array(all_labels)[sort_idx].astype(bool)
+    ground_truth_sort = all_labels[sort_idx].astype(bool)
     
     ###########################################################
     
@@ -106,10 +111,10 @@ def neyman_pearson_test(ground_truth_sort, LLR, tar_scores, imp_scores, fnr):
     fpr_thr = np.zeros(len_thr)
     
     for idx in range(len_thr):
-        solution = LLR > LLR[idx]  # decision
-        err = (solution != ground_truth_sort)  # error vector
-        fnr_thr[idx] = np.sum(err[ground_truth_sort]) / len(tar_scores)  # FNR
-        fpr_thr[idx] = np.sum(err[~ground_truth_sort]) / len(imp_scores)  # FPR
+        solution = LLR > LLR[idx]
+        err = (solution != ground_truth_sort)
+        fnr_thr[idx] = np.sum(err[ground_truth_sort]) / len(tar_scores)
+        fpr_thr[idx] = np.sum(err[~ground_truth_sort]) / len(imp_scores)
     
     # Find index where FNR is closest to the given fnr
     fnr_idx = np.argmin(np.abs(fnr_thr - fnr))
@@ -156,6 +161,9 @@ def bayes_test(ground_truth_sort, LLR, tar_scores, imp_scores, P_Htar, C00, C10,
     fpr = fpr_thr[AC_idx]
     AC = AC_thr[AC_idx]
     
+    plot(LLR, AC_thr, color='blue')
+    xlabel('$LLR$'); ylabel('$\\bar{C}$'); title('Average cost'); grid(); show()
+    
     ###########################################################
     
     return thr, fnr, fpr, AC
@@ -175,19 +183,15 @@ def minmax_test(ground_truth_sort, LLR, tar_scores, imp_scores, P_Htar_thr, C00,
     fnr_thr = np.zeros(len_thr)
     fpr_thr = np.zeros(len_thr)
     
-    # Compute FNR and FPR for all thresholds
     for idx in range(len_thr):
-        solution = LLR > LLR[idx]  # decision
-        err = (solution != ground_truth_sort)  # error vector
-        fnr_thr[idx] = np.sum(err[ground_truth_sort]) / len(tar_scores)  # FNR
-        fpr_thr[idx] = np.sum(err[~ground_truth_sort]) / len(imp_scores)  # FPR
+        solution = LLR > LLR[idx]
+        err = (solution != ground_truth_sort)
+        fnr_thr[idx] = np.sum(err[ground_truth_sort]) / len(tar_scores)
+        fpr_thr[idx] = np.sum(err[~ground_truth_sort]) / len(imp_scores)
     
-    # For minimax, find threshold that minimizes maximum cost over all P_Htar
-    # We need to find the threshold where max cost is minimized
     max_AC_thr = np.zeros(len_thr)
     
     for idx in range(len_thr):
-        # Compute cost for different P_Htar values and find maximum
         P_Htar_range = np.linspace(0.01, 0.99, 100)
         AC_range = np.zeros(len(P_Htar_range))
         
@@ -200,14 +204,12 @@ def minmax_test(ground_truth_sort, LLR, tar_scores, imp_scores, P_Htar_thr, C00,
         
         max_AC_thr[idx] = np.max(AC_range)
     
-    # Find threshold that minimizes maximum cost
     minmax_idx = np.argmin(max_AC_thr)
     thr = LLR[minmax_idx]
     fnr = fnr_thr[minmax_idx]
     fpr = fpr_thr[minmax_idx]
     AC = max_AC_thr[minmax_idx]
     
-    # Find P_Htar that gives maximum cost at this threshold
     P_Htar_range = np.linspace(0.01, 0.99, 100)
     AC_range = np.zeros(len(P_Htar_range))
     for p_idx, P_Htar_val in enumerate(P_Htar_range):
@@ -218,6 +220,30 @@ def minmax_test(ground_truth_sort, LLR, tar_scores, imp_scores, P_Htar_thr, C00,
                          C11 * (1 - fnr) * P_Htar_val
     
     P_Htar = P_Htar_range[np.argmax(AC_range)]
+    
+    P_Htar_mesh = np.linspace(0.0, 1.0, 50)
+    
+    LLR_min = 1.5
+    LLR_max = 0.0
+    
+    AC_surface = np.zeros((len_thr, len(P_Htar_mesh)))
+    
+    LLR_interp = np.linspace(LLR_min, LLR_max, len_thr)
+    
+    for thr_idx in range(len_thr):
+        actual_thr_idx = np.argmin(np.abs(LLR - LLR_interp[thr_idx]))
+        for p_idx, P_Htar_val in enumerate(P_Htar_mesh):
+            P_Himp_val = 1 - P_Htar_val
+            AC_surface[thr_idx, p_idx] = C00 * (1 - fpr_thr[actual_thr_idx]) * P_Himp_val + \
+                                         C10 * fpr_thr[actual_thr_idx] * P_Himp_val + \
+                                         C01 * fnr_thr[actual_thr_idx] * P_Htar_val + \
+                                         C11 * (1 - fnr_thr[actual_thr_idx]) * P_Htar_val
+    
+    imshow(AC_surface, aspect='auto', origin='lower', 
+           extent=[P_Htar_mesh.min(), P_Htar_mesh.max(), LLR_min, LLR_max],
+           cmap='viridis')
+    xlabel('$P(H_0)$'); ylabel('$LLR$'); title('Average cost surface (top view)'); 
+    plt.colorbar(label='$\\bar{C}$'); show()
     
     ###########################################################
     
