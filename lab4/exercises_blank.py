@@ -180,70 +180,71 @@ def minmax_test(ground_truth_sort, LLR, tar_scores, imp_scores, P_Htar_thr, C00,
     ###########################################################
     # Here is your code
     len_thr = len(LLR)
+    len_P_Htar_thr = len(P_Htar_thr)
+    tpr_thr = np.zeros(len_thr)
     fnr_thr = np.zeros(len_thr)
     fpr_thr = np.zeros(len_thr)
+    tnr_thr = np.zeros(len_thr)
+    AC = np.zeros([len_thr, len_P_Htar_thr])
     
     for idx in range(len_thr):
-        solution = LLR > LLR[idx]
-        err = (solution != ground_truth_sort)
-        fnr_thr[idx] = np.sum(err[ground_truth_sort]) / len(tar_scores)
-        fpr_thr[idx] = np.sum(err[~ground_truth_sort]) / len(imp_scores)
+        solution = LLR > LLR[idx]                                      # decision
+        
+        ts = (solution == ground_truth_sort)                            # true solution vector
+        err = (solution != ground_truth_sort)                          # error vector
+        
+        tpr_thr[idx] = np.sum(ts[ ground_truth_sort])/len(tar_scores)  # true positive ratio (TPR)
+        fnr_thr[idx] = np.sum(err[ ground_truth_sort])/len(tar_scores) # prob. of Type I error P(Dimp|Htar), false negative rate (FNR)
+        fpr_thr[idx] = np.sum(err[~ground_truth_sort])/len(imp_scores) # prob. of Type II error P(Dtar|Himp), false positive rate (FPR)
+        tnr_thr[idx] = np.sum(ts[ ~ground_truth_sort])/len(imp_scores) # true negative ratio (TNR)
+        
+        for idy in range(len_P_Htar_thr):
+            AC[idx, idy] = C00*tpr_thr[idx]*P_Htar_thr[idy] + C10*fnr_thr[idx]*P_Htar_thr[idy] + \
+                          C01*fpr_thr[idx]*(1 - P_Htar_thr[idy]) + C11*tnr_thr[idx]*(1 - P_Htar_thr[idy])  # Bayes' risk (average cost)
     
-    max_AC_thr = np.zeros(len_thr)
+    # Plot average cost
+    # Use safe indices
+    start_idx = min(18705, len_thr - 200) if len_thr > 200 else 0
+    end_idx = min(18905, len_thr)
+    p_end_idx = min(999, len_P_Htar_thr - 1)
     
+    if end_idx > start_idx and len_P_Htar_thr > 0:
+        # Calculate aspect ratio to make the plot square
+        x_range = P_Htar_thr[p_end_idx] - P_Htar_thr[0]
+        y_range = LLR[start_idx] - LLR[end_idx-1]
+        num_rows = end_idx - start_idx
+        num_cols = len_P_Htar_thr
+        
+        if x_range > 0 and y_range > 0 and num_rows > 0 and num_cols > 0:
+            # Aspect ratio: (y_range / num_rows) / (x_range / num_cols)
+            aspect_ratio = (y_range * num_cols) / (x_range * num_rows)
+            # Ensure aspect is finite and positive
+            if not np.isfinite(aspect_ratio) or aspect_ratio <= 0:
+                aspect_ratio = 'auto'
+        else:
+            aspect_ratio = 'auto'
+        
+        imshow(AC[start_idx:end_idx, :], extent=[P_Htar_thr[0], P_Htar_thr[p_end_idx], LLR[end_idx-1], LLR[start_idx]], aspect=aspect_ratio)
+        xlabel('$P(H_0)$'); ylabel('$LLR$'); title('Average cost surface (top view)'); show()
+    
+    AC_P_Htar_max = np.zeros(len_thr)
     for idx in range(len_thr):
-        P_Htar_range = np.linspace(0.01, 0.99, 100)
-        AC_range = np.zeros(len(P_Htar_range))
-        
-        for p_idx, P_Htar_val in enumerate(P_Htar_range):
-            P_Himp_val = 1 - P_Htar_val
-            AC_range[p_idx] = C00 * (1 - fpr_thr[idx]) * P_Himp_val + \
-                             C10 * fpr_thr[idx] * P_Himp_val + \
-                             C01 * fnr_thr[idx] * P_Htar_val + \
-                             C11 * (1 - fnr_thr[idx]) * P_Htar_val
-        
-        max_AC_thr[idx] = np.max(AC_range)
+        AC_P_Htar_max[idx] = np.amax(AC[idx,:])
+    AC_min_max_idx = np.argmin(AC_P_Htar_max)
     
-    minmax_idx = np.argmin(max_AC_thr)
-    thr = LLR[minmax_idx]
-    fnr = fnr_thr[minmax_idx]
-    fpr = fpr_thr[minmax_idx]
-    AC = max_AC_thr[minmax_idx]
+    AC_thr_min = np.zeros(len_P_Htar_thr)
+    for idy in range(len_P_Htar_thr):
+        AC_thr_min[idy] = np.amin(AC[:, idy])
+    AC_max_min_idx = np.argmax(AC_thr_min)
     
-    P_Htar_range = np.linspace(0.01, 0.99, 100)
-    AC_range = np.zeros(len(P_Htar_range))
-    for p_idx, P_Htar_val in enumerate(P_Htar_range):
-        P_Himp_val = 1 - P_Htar_val
-        AC_range[p_idx] = C00 * (1 - fpr) * P_Himp_val + \
-                         C10 * fpr * P_Himp_val + \
-                         C01 * fnr * P_Htar_val + \
-                         C11 * (1 - fnr) * P_Htar_val
+    solution = LLR > LLR[AC_min_max_idx]                               # decision
+    err = (solution != ground_truth_sort)                               # error vector
+    fnr = np.sum(err[ ground_truth_sort])/len(tar_scores)
+    fpr = np.sum(err[~ground_truth_sort])/len(imp_scores)
     
-    P_Htar = P_Htar_range[np.argmax(AC_range)]
-    
-    P_Htar_mesh = np.linspace(0.0, 1.0, 50)
-    
-    LLR_min = 1.5
-    LLR_max = 0.0
-    
-    AC_surface = np.zeros((len_thr, len(P_Htar_mesh)))
-    
-    LLR_interp = np.linspace(LLR_min, LLR_max, len_thr)
-    
-    for thr_idx in range(len_thr):
-        actual_thr_idx = np.argmin(np.abs(LLR - LLR_interp[thr_idx]))
-        for p_idx, P_Htar_val in enumerate(P_Htar_mesh):
-            P_Himp_val = 1 - P_Htar_val
-            AC_surface[thr_idx, p_idx] = C00 * (1 - fpr_thr[actual_thr_idx]) * P_Himp_val + \
-                                         C10 * fpr_thr[actual_thr_idx] * P_Himp_val + \
-                                         C01 * fnr_thr[actual_thr_idx] * P_Htar_val + \
-                                         C11 * (1 - fnr_thr[actual_thr_idx]) * P_Htar_val
-    
-    imshow(AC_surface, aspect='auto', origin='lower', 
-           extent=[P_Htar_mesh.min(), P_Htar_mesh.max(), LLR_min, LLR_max],
-           cmap='viridis')
-    xlabel('$P(H_0)$'); ylabel('$LLR$'); title('Average cost surface (top view)'); 
-    plt.colorbar(label='$\\bar{C}$'); show()
+    thr = LLR[AC_min_max_idx]
+    AC = AC[AC_min_max_idx, AC_max_min_idx]
+    P_Htar = P_Htar_thr[AC_max_min_idx]
     
     ###########################################################
     

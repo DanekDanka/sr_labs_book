@@ -135,11 +135,11 @@ class ResNetSE(nn.Module):
 
         return x
 
-def MainModel(nOut=512, **kwargs):
-    # Create main model for speaker recognition
+# def MainModel(nOut=512, **kwargs):
+#     # Create main model for speaker recognition
     
-    num_filters = [32, 64, 128, 256]
+#     num_filters = [32, 64, 128, 256]
     
-    model = ResNetSE(SEBasicBlock, [3, 4, 6, 3], num_filters, nOut, **kwargs)
+#     model = ResNetSE(SEBasicBlock, [3, 4, 6, 3], num_filters, nOut, **kwargs)
     
-    return model
+#     return model

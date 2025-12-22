@@ -127,6 +127,92 @@ def s_norm(test_data, lines, adapt_data, N_s=200, eps=0.5):
     ###########################################################
     # Here is your code
     
+    # Check if CUDA is available
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # Create mapping from wav file to speaker ID and indices
+    enroll_spk_map = {enroll_list[i]: enroll_list[i].split('/')[0] for i in range(len(enroll_list))}
+    test_spk_map = {test_list[i]: test_list[i].split('/')[0] for i in range(len(test_list))}
+    adapt_spk_map = {adapt_list[i]: adapt_list[i].split('/')[0] for i in range(len(adapt_list))}
+    
+    enroll_wav_to_idx = {enroll_list[i]: i for i in range(len(enroll_list))}
+    test_wav_to_idx = {test_list[i]: i for i in range(len(test_list))}
+    adapt_wav_to_idx = {adapt_list[i]: i for i in range(len(adapt_list))}
+    
+    E_torch = torch.FloatTensor(E).to(device)
+    T_torch = torch.FloatTensor(T).to(device)
+    A_torch = torch.FloatTensor(A).to(device)
+    
+    # Normalize embeddings for cosine similarity
+    E_torch = torch.nn.functional.normalize(E_torch, p=2, dim=1)
+    T_torch = torch.nn.functional.normalize(T_torch, p=2, dim=1)
+    A_torch = torch.nn.functional.normalize(A_torch, p=2, dim=1)
+    
+    # Precompute all similarities: enroll vs adapt, test vs adapt
+    # This is a large matrix multiplication: [num_enroll x emb_dim] @ [emb_dim x num_adapt] = [num_enroll x num_adapt]
+    enroll_adapt_similarities = torch.mm(E_torch, A_torch.t()).cpu().numpy()  # [num_enroll x num_adapt]
+    test_adapt_similarities = torch.mm(T_torch, A_torch.t()).cpu().numpy()    # [num_test x num_adapt]
+    
+    for line in tqdm.tqdm(lines, desc='Scoring with s-norm'):
+        data = line.strip().split()
+        label = int(data[0])
+        enroll_wav = data[1]
+        test_wav = data[2]
+        
+        enroll_spk_id = enroll_spk_map[enroll_wav]
+        test_spk_id = test_spk_map[test_wav]
+        
+        enroll_idx = enroll_wav_to_idx[enroll_wav]
+        test_idx = test_wav_to_idx[test_wav]
+        
+        # Compute raw score S using normalized embeddings
+        enroll_emb = E_torch[enroll_idx:enroll_idx+1]
+        test_emb = T_torch[test_idx:test_idx+1]
+        S = torch.mm(enroll_emb, test_emb.t()).item()
+        
+        # Find impostor cohort indices (speakers that don't match enroll or test)
+        impostor_indices = []
+        for i, adapt_wav in enumerate(adapt_list):
+            adapt_spk_id = adapt_spk_map[adapt_wav]
+            if adapt_spk_id != enroll_spk_id and adapt_spk_id != test_spk_id:
+                impostor_indices.append(i)
+        
+        if len(impostor_indices) == 0:
+            scores_adapted.append(S)
+            all_labels.append(label)
+            all_trials.append(enroll_wav + " " + test_wav)
+            continue
+        
+        impostor_indices = np.array(impostor_indices)
+        
+        # Get enroll scores with impostors (already computed)
+        enroll_scores = enroll_adapt_similarities[enroll_idx, impostor_indices]
+        enroll_scores_sorted = np.sort(enroll_scores)[::-1]  # Sort descending
+        top_N_enroll = enroll_scores_sorted[:min(N_s, len(enroll_scores_sorted))]
+        
+        # Compute mean and std for enroll
+        mu_e = np.mean(top_N_enroll)
+        sigma_e = np.std(top_N_enroll)
+        if sigma_e < eps:
+            sigma_e = eps
+        
+        # Get test scores with impostors (already computed)
+        test_scores = test_adapt_similarities[test_idx, impostor_indices]
+        test_scores_sorted = np.sort(test_scores)[::-1]  # Sort descending
+        top_N_test = test_scores_sorted[:min(N_s, len(test_scores_sorted))]
+        
+        # Compute mean and std for test
+        mu_t = np.mean(top_N_test)
+        sigma_t = np.std(top_N_test)
+        if sigma_t < eps:
+            sigma_t = eps
+        
+        S_norm = (S - mu_e) / (2 * sigma_e) + (S - mu_t) / (2 * sigma_t)
+        
+        scores_adapted.append(S_norm)
+        all_labels.append(label)
+        all_trials.append(enroll_wav + " " + test_wav)
+    
     ###########################################################
 
     return scores_adapted, all_labels, all_trials
@@ -161,7 +247,8 @@ class LinearCalibrationModel(torch.nn.Module):
         
         ###########################################################
         # Here is your code
-            
+        # Apply linear transformation: S_c = a*S + b
+        calib_x = self.calib_params(x)
         ###########################################################
 
         return calib_x
@@ -190,7 +277,30 @@ class CalibrationLoss(nn.Module):
         
         ###########################################################
         # Here is your code
-
+        # Compute loss according to the formula:
+        # J(a,b) = P(H_0)/N_0 * sum(ln(1 + exp(-(aS_i + b) + T_act^LLR))) 
+        #        + (1 - P(H_0))/N_1 * sum(ln(1 + exp(aS_i + b - T_act^LLR)))
+        # where T_act^LLR = alpha = ln(P(H_0)/(1 - P(H_0)))
+        
+        # Convert scores to log-odds (LLR)
+        target_llrs_reshaped = target_llrs.view(-1, 1)
+        nontarget_llrs_reshaped = nontarget_llrs.view(-1, 1)
+        
+        # Compute loss for target trials
+        # ln(1 + exp(-(aS + b) + T_act^LLR)) = ln(1 + exp(-(LLR - T_act^LLR)))
+        # Since target_llrs are already calibrated scores (aS + b), we need:
+        # ln(1 + exp(-(target_llrs - self.alpha)))
+        target_loss = negative_log_sigmoid(target_llrs_reshaped - self.alpha)
+        target_loss = self.ptar * torch.mean(target_loss)
+        
+        # Compute loss for nontarget (impostor) trials
+        # ln(1 + exp(aS + b - T_act^LLR)) = ln(1 + exp(LLR - T_act^LLR))
+        # Since nontarget_llrs are already calibrated scores (aS + b), we need:
+        # ln(1 + exp(nontarget_llrs - self.alpha))
+        nontarget_loss = negative_log_sigmoid(-(nontarget_llrs_reshaped - self.alpha))
+        nontarget_loss = (1 - self.ptar) * torch.mean(nontarget_loss)
+        
+        loss_value = target_loss + nontarget_loss
         ###########################################################
 
         return loss_value
@@ -208,7 +318,17 @@ def train_calibration(train_loader, model, criterion, optimizer, scheduler, num_
             
             ###########################################################
             # Here is your code
+            tar_sc_tensor = torch.tensor(tar_sc, dtype=torch.float32).view(-1, 1)
+            imp_sc_tensor = torch.tensor(imp_sc, dtype=torch.float32).view(-1, 1)
+
+            tar_sc_calib = model(tar_sc_tensor)
+            imp_sc_calib = model(imp_sc_tensor)
             
+            loss = criterion(tar_sc_calib, imp_sc_calib)
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
             ###########################################################
                             
         lr_value = optimizer.param_groups[0]['lr']
