@@ -7,7 +7,6 @@ import csv
 import random
 from collections import defaultdict
 from typing import List, Tuple, Dict
-import numpy as np
 
 
 def parse_date_of_birth(date_str: str) -> int:
@@ -115,15 +114,6 @@ def scan_dataset(dataset_path: str) -> Dict[str, List[Tuple[int, str]]]:
         dataset_structure[speaker_id].sort(key=lambda x: x[0])
     
     return dict(dataset_structure)
-
-
-def get_speaker_age_at_year(birth_year: int, recording_year: int) -> int:
-    """
-    Вычисляет возраст диктора в год записи
-    """
-    if birth_year is None:
-        return None
-    return recording_year - birth_year
 
 
 def generate_protocol(

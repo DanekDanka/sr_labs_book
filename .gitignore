@@ -1,6 +1,7 @@
 #Custom
 data/*
 !data/lists
+test_dataset/results/*
 
 #idea files
 .idea
